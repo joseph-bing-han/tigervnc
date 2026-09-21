@@ -41,6 +41,7 @@ const int kVK_Menu = 0x6E;
 
 #define XK_LATIN1
 #define XK_MISCELLANY
+#define XK_XKB_KEYS
 #include <rfb/keysymdef.h>
 #include <rfb/XF86keysym.h>
 #include <rfb/ledStates.h>
@@ -199,6 +200,23 @@ bool KeyboardMacOS::handleEvent(const void* event)
       vlog.error(_("No symbol for key code 0x%02x (in the current state)"),
                  systemKeyCode);
     }
+
+#ifdef __APPLE__
+    switch (keySym) {
+    case XK_Super_L:
+      keySym = XK_Control_L;
+      break;
+    case XK_Super_R:
+      keySym = XK_Super_L;
+      break;
+    case XK_Alt_L:
+      keySym = XK_Mode_switch;
+      break;
+    case XK_Alt_R:
+      keySym = XK_ISO_Level3_Shift;
+      break;
+    }
+#endif
 
     handler->handleKeyPress(systemKeyCode, keyCode, keySym);
 
