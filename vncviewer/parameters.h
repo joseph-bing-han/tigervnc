@@ -39,6 +39,7 @@ extern core::BoolParameter alwaysCursor;
 extern core::EnumParameter cursorType;
 
 extern core::StringParameter passwordFile;
+extern core::StringParameter username;
 
 extern core::BoolParameter autoSelect;
 extern core::BoolParameter fullColour;
@@ -84,6 +85,7 @@ extern core::StringParameter via;
 
 void saveViewerParameters(const char *filename, const char *servername=nullptr);
 char* loadViewerParameters(const char *filename);
+void resetViewerParameters();
 
 #ifdef _WIN32
 std::list<std::string> loadHistoryFromRegKey();

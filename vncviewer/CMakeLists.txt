@@ -19,6 +19,8 @@ add_executable(vncviewer
   ShortcutHandler.cxx
   Surface.cxx
   OptionsDialog.cxx
+  OptionsPanel.cxx
+  ProfileStore.cxx
   PlatformPixelBuffer.cxx
   Viewport.cxx
   parameters.cxx
@@ -43,6 +45,7 @@ if(WIN32)
   target_sources(vncviewer PRIVATE KeyboardWin32.cxx keysym2ucs.c)
   target_sources(vncviewer PRIVATE Surface_Win32.cxx)
 elseif(APPLE)
+  target_sources(vncviewer PRIVATE ProfileEditor.cxx)
   target_sources(vncviewer PRIVATE cocoa.mm)
   target_sources(vncviewer PRIVATE KeyboardMacOS.mm osx_to_qnum.c keysym2ucs.c)
   target_sources(vncviewer PRIVATE Surface_OSX.cxx)

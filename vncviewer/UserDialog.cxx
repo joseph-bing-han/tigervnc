@@ -24,6 +24,11 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 #include <FL/Fl.H>
 #include <FL/fl_ask.H>
@@ -37,6 +42,7 @@
 #include <FL/Fl_Pixmap.H>
 
 #include <core/Exception.h>
+#include <core/LogWriter.h>
 
 #include <rfb/CConnection.h>
 #include <rfb/Exception.h>
@@ -58,8 +64,36 @@
 static Fl_Pixmap secure_icon(secure);
 static Fl_Pixmap insecure_icon(insecure);
 
+static core::LogWriter vlog("UserDialog");
+
+/* Stores a password in the same obfuscated format as vncpasswd */
+static void savePasswordFile(const char *path, const std::string& password)
+{
+  const std::vector<uint8_t> obfuscated = rfb::obfuscate(password.c_str());
+
+  FILE *fp = fopen(path, "wb");
+  if (fp == nullptr) {
+    vlog.error(_("Could not store the password in \"%s\": %s"),
+               path, strerror(errno));
+    return;
+  }
+
+#ifndef WIN32
+  if (fchmod(fileno(fp), S_IRUSR | S_IWUSR) == -1)
+    vlog.error(_("Could not protect \"%s\": %s"), path, strerror(errno));
+#endif
+
+  if (fwrite(obfuscated.data(), 1, obfuscated.size(), fp) !=
+      obfuscated.size())
+    vlog.error(_("Could not store the password in \"%s\": %s"),
+               path, strerror(errno));
+
+  fclose(fp);
+}
+
 std::string UserDialog::savedUsername;
 std::string UserDialog::savedPassword;
+static bool managedPasswordFile = false;
 
 static long ret_val = 0;
 
@@ -88,6 +122,27 @@ void UserDialog::resetPassword()
 {
   savedUsername.clear();
   savedPassword.clear();
+
+  /* A failed authentication means the stored password is no longer valid,
+     so drop it and let the user enter a new one */
+  const char *passwordFileName(passwordFile);
+
+  if (managedPasswordFile && passwordFileName[0]) {
+    if (remove(passwordFileName) == -1 && errno != ENOENT)
+      vlog.error(_("Could not remove \"%s\": %s"),
+                 passwordFileName, strerror(errno));
+  }
+}
+
+void UserDialog::resetSavedCredentials()
+{
+  savedUsername.clear();
+  savedPassword.clear();
+}
+
+void UserDialog::setManagedPasswordFile(bool managed)
+{
+  managedPasswordFile = managed;
 }
 
 void UserDialog::getUserPasswd(bool secure_, std::string* user,
@@ -121,25 +176,30 @@ void UserDialog::getUserPasswd(bool secure_, std::string* user,
     return;
   }
 
-  if (!user && passwordFileName[0]) {
-    std::vector<uint8_t> obfPwd(8);
-    FILE* fp;
+  if (passwordFileName[0]) {
+    FILE* fp = fopen(passwordFileName, "rb");
 
-    fp = fopen(passwordFileName, "rb");
-    if (!fp)
-      throw core::posix_error(_("Opening password file failed"), errno);
+    if (fp != nullptr) {
+      std::vector<uint8_t> obfPwd(8);
 
-    obfPwd.resize(fread(obfPwd.data(), 1, obfPwd.size(), fp));
-    fclose(fp);
+      obfPwd.resize(fread(obfPwd.data(), 1, obfPwd.size(), fp));
+      fclose(fp);
 
-    *password = rfb::deobfuscate(obfPwd.data(), obfPwd.size());
+      if (obfPwd.size() == 8) {
+        if (user)
+          *user = ::username;
+        *password = rfb::deobfuscate(obfPwd.data(), obfPwd.size());
+        return;
+      }
+    }
 
-    return;
+    /* Nothing stored yet, so ask the user and store it afterwards */
+    vlog.info(_("No usable password in \"%s\""), passwordFileName);
   }
 
   Fl_Window *win;
   Fl_Box *banner;
-  Fl_Input *username;
+  Fl_Input *usernameInput;
   Fl_Secret_Input *passwd;
   Fl_Box *icon;
   Fl_Button *button;
@@ -179,16 +239,17 @@ void UserDialog::getUserPasswd(bool secure_, std::string* user,
 
   if (user) {
     y += INPUT_LABEL_OFFSET;
-    username = new Fl_Input(x, y, win->w()- x - OUTER_MARGIN,
-                            INPUT_HEIGHT, _("Username:"));
-    username->align(FL_ALIGN_LEFT | FL_ALIGN_TOP);
+    usernameInput = new Fl_Input(x, y, win->w()- x - OUTER_MARGIN,
+                                 INPUT_HEIGHT, _("Username:"));
+    usernameInput->align(FL_ALIGN_LEFT | FL_ALIGN_TOP);
+    usernameInput->value(::username);
     y += INPUT_HEIGHT + INNER_MARGIN;
   } else {
     /*
      * Compiler is not bright enough to understand that
      * username won't be used further down...
      */
-    username = nullptr;
+    usernameInput = nullptr;
   }
 
   y += INPUT_LABEL_OFFSET;
@@ -246,13 +307,18 @@ void UserDialog::getUserPasswd(bool secure_, std::string* user,
       keepPasswd = false;
 
     if (user) {
-      *user = username->value();
+      *user = usernameInput->value();
+      ::username.setParam(usernameInput->value());
       if (keepPasswd)
-        savedUsername = username->value();
+        savedUsername = usernameInput->value();
     }
     *password = passwd->value();
     if (keepPasswd)
       savedPassword = passwd->value();
+
+    /* Remember the password so that the next connection can be automatic */
+    if (managedPasswordFile && passwordFileName[0])
+      savePasswordFile(passwordFileName, *password);
   }
 
   delete win;

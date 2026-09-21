@@ -48,6 +48,10 @@
 #include <errno.h>
 #include <assert.h>
 
+#ifndef WIN32
+#include <sys/stat.h>
+#endif
+
 #include "i18n.h"
 
 static core::LogWriter vlog("Parameters");
@@ -96,6 +100,11 @@ core::StringParameter
                "");
 core::AliasParameter
   passwd("passwd", "Alias for PasswordFile", &passwordFile);
+
+core::StringParameter
+  username("Username",
+           "Username for VNC authentication",
+           "");
 
 core::BoolParameter
   autoSelect("AutoSelect",
@@ -255,6 +264,7 @@ static core::VoidParameter* parameterArray[] = {
   &rfb::CSecurityTLS::X509CRL,
 #endif // HAVE_GNUTLS
   &rfb::SecurityClient::secTypes,
+  &username,
   /* Misc. */
   &reconnectOnError,
   &shared,
@@ -727,11 +737,23 @@ static char* loadFromReg() {
 }
 #endif // _WIN32
 
+/*
+ * Restore the settings that are stored in configuration files to their
+ * defaults, so that the values of one configuration cannot leak into another
+ * one when it is loaded.
+ */
+void resetViewerParameters()
+{
+  for (core::VoidParameter* param : parameterArray)
+    param->setParam(param->getDefaultStr().c_str());
+}
+
 
 void saveViewerParameters(const char *filename, const char *servername) {
 
   const size_t buffersize = 256;
   char filepath[PATH_MAX];
+  char temporaryFilepath[PATH_MAX];
   char encodingBuffer[buffersize];
 
   // Write to the registry or a predefined file if no filename was specified.
@@ -751,17 +773,24 @@ void saveViewerParameters(const char *filename, const char *servername) {
     snprintf(filepath, sizeof(filepath), "%s", filename);
   }
 
+  snprintf(temporaryFilepath, sizeof(temporaryFilepath), "%s.tmp", filepath);
+
   /* Write parameters to file */
-  FILE* f = fopen(filepath, "w+");
+  FILE* f = fopen(temporaryFilepath, "w+");
   if (!f)
     throw core::posix_error(
-      core::format(_("Could not open \"%s\""), filepath), errno);
+      core::format(_("Could not open \"%s\""), temporaryFilepath), errno);
+
+#ifndef WIN32
+  (void)fchmod(fileno(f), 0600);
+#endif
 
   fprintf(f, "%s\n", IDENTIFIER_STRING);
   fprintf(f, "\n");
 
   if (!encodeValue(servername, encodingBuffer, buffersize)) {
     fclose(f);
+    remove(temporaryFilepath);
     throw std::runtime_error(
       core::format(_("Failed to save \"%s\": %s"), "ServerName",
                    _("Could not encode parameter")));
@@ -774,13 +803,32 @@ void saveViewerParameters(const char *filename, const char *servername) {
     if (!encodeValue(param->getValueStr().c_str(),
                      encodingBuffer, buffersize)) {
       fclose(f);
+      remove(temporaryFilepath);
       throw std::runtime_error(
         core::format(_("Failed to save \"%s\": %s"), param->getName(),
                      _("Could not encode parameter")));
     }
     fprintf(f, "%s=%s\n", param->getName(), encodingBuffer);
   }
-  fclose(f);
+  if (fclose(f) != 0) {
+    remove(temporaryFilepath);
+    throw core::posix_error(
+      core::format(_("Could not close \"%s\""), temporaryFilepath), errno);
+  }
+
+  if (rename(temporaryFilepath, filepath) != 0) {
+#ifdef WIN32
+    /* The Windows C runtime does not replace an existing destination. */
+    if (errno == EEXIST && remove(filepath) == 0 &&
+        rename(temporaryFilepath, filepath) == 0)
+      return;
+#endif
+    const int savedErrno = errno;
+    remove(temporaryFilepath);
+    errno = savedErrno;
+    throw core::posix_error(
+      core::format(_("Could not replace \"%s\""), filepath), errno);
+  }
 }
 
 static bool findAndSetViewerParameterFromValue(

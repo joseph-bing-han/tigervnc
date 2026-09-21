@@ -22,11 +22,19 @@
 #include <FL/Fl_Window.H>
 #include <string>
 #include <list>
+#ifdef __APPLE__
+#include <vector>
+#endif
 
 #include "fltk/Fl_Suggestion_Input.h"
 
 class Fl_Widget;
 class Fl_Input_Choice;
+class Fl_Browser;
+
+#ifdef __APPLE__
+struct ProfileEditorData;
+#endif
 
 class ServerDialog : public Fl_Window {
 protected:
@@ -37,6 +45,28 @@ public:
   static void run(const char* servername, char *newservername);
 
 protected:
+#ifdef __APPLE__
+  static void handleProfiles(Fl_Widget *widget, void *data);
+  static void handleAdd(Fl_Widget *widget, void *data);
+  static void handleAbout(Fl_Widget *widget, void *data);
+  static void handleCancel(Fl_Widget *widget, void *data);
+  static void handleContextMenu(Fl_Widget *widget, void *data);
+
+  void loadProfiles();
+  void refreshProfiles();
+  void editProfile(int line);
+  void deleteProfile(int line);
+  void connectProfile(int line);
+  bool readProfile(const std::string& name, ProfileEditorData *data);
+  bool writeProfile(const ProfileEditorData& data,
+                    const std::string& oldName);
+  std::string profilePath(const std::string& name) const;
+  std::string profileDirectory() const;
+
+  std::vector<std::string> profileNames;
+  Fl_Browser *profileList;
+  int contextLine;
+#else
   static void handleOptions(Fl_Widget *widget, void *data);
   static void handleLoad(Fl_Widget *widget, void *data);
   static void handleSaveAs(Fl_Widget *widget, void *data);
@@ -51,11 +81,16 @@ private:
 
   static void onServerHistoryRemove(Fl_Widget*, std::string s, void* data);
   static std::string serverHistoryNormalize(const std::string s);
+#endif
 
 protected:
+#ifdef __APPLE__
+  std::string selectedServerName;
+#else
   Fl_Suggestion_Input *serverName;
   std::list<std::string> serverHistory;
   std::string usedDir;
+#endif
 };
 
 #endif

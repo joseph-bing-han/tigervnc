@@ -19,6 +19,10 @@
 #ifndef __USERDIALOG_H__
 #define __USERDIALOG_H__
 
+#include <string>
+
+#include <rfb/CConnection.h>
+
 class UserDialog
 {
 public:
@@ -34,6 +38,12 @@ public:
   bool showMsgBox(rfb::MsgBoxFlags flags, const char* title, const char* text);
 
   void resetPassword();
+
+  /* 清除当前进程缓存的凭据，但不删除配置文件中的密码。 */
+  static void resetSavedCredentials();
+
+  /* 标记当前 PasswordFile 是否由 macOS 配置列表管理。 */
+  static void setManagedPasswordFile(bool managed);
 
 private:
   static std::string savedUsername;

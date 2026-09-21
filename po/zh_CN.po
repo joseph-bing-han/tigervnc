@@ -1118,3 +1118,78 @@ msgstr "远程桌面查看器"
 
 #~ msgid "Using default colormap and visual, TrueColor, depth %d."
 #~ msgstr "正在使用默认的颜色映射及视觉效果，真彩色，色深 %d。"
+
+msgid "Add VNC configuration"
+msgstr "添加 VNC 配置"
+
+msgid "Edit VNC configuration"
+msgstr "修改 VNC 配置"
+
+msgid "Add configuration"
+msgstr "添加配置"
+
+msgid "Modify configuration"
+msgstr "修改配置"
+
+msgid "Delete configuration"
+msgstr "删除配置"
+
+msgid "Delete the configuration \"%s\"?"
+msgstr "删除配置“%s”？"
+
+msgid "Delete"
+msgstr "删除"
+
+msgid "Add"
+msgstr "添加"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Name:"
+msgstr "名称："
+
+msgid "A VNC server is required."
+msgstr "必须填写 VNC 服务器地址。"
+
+msgid "The configuration name is not valid."
+msgstr "配置名称无效。"
+
+msgid "The selected configuration has no VNC server."
+msgstr "所选配置没有 VNC 服务器地址。"
+
+msgid "A configuration named \"%s\" already exists."
+msgstr "已存在名为“%s”的配置。"
+
+msgid "Unable to load VNC configurations:\n\n%s"
+msgstr "无法加载 VNC 配置：\n\n%s"
+
+msgid "Unable to load the configuration:\n\n%s"
+msgstr "无法加载配置：\n\n%s"
+
+msgid "Unable to save the configuration:\n\n%s"
+msgstr "无法保存配置：\n\n%s"
+
+msgid "Unable to delete the configuration:\n\n%s"
+msgstr "无法删除配置：\n\n%s"
+
+msgid "Unable to reload VNC configurations:\n\n%s"
+msgstr "无法重新加载 VNC 配置：\n\n%s"
+
+msgid "Could not determine the user home directory"
+msgstr "无法确定用户主目录"
+
+msgid "Could not create configuration directory \"%s\""
+msgstr "无法创建配置目录“%s”"
+
+msgid "Could not open configuration directory \"%s\""
+msgstr "无法打开配置目录“%s”"
+
+msgid "No usable password in \"%s\""
+msgstr "“%s”中没有可用的密码"
+
+msgid "Could not store the password in \"%s\": %s"
+msgstr "无法把密码保存到“%s”：%s"
+
+msgid "Could not protect \"%s\": %s"
+msgstr "无法设置“%s”的权限：%s"

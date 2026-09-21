@@ -10,6 +10,8 @@
 	<string>vncviewer</string>
 	<key>NSHighResolutionCapable</key>
 	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TigerVNC needs local network access to connect to VNC servers.</string>
 	<key>CFBundleGetInfoString</key>
 	<string>@VERSION@, Copyright (C) 1999-2026 TigerVNC team and many others (see README.rst)</string>
 	<key>CFBundleIconFile</key>

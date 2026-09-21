@@ -58,6 +58,8 @@
 
 static core::LogWriter vlog("ServerDialog");
 
+#ifndef __APPLE__
+
 const char* SERVER_HISTORY="tigervnc.history";
 
 ServerDialog::ServerDialog()
@@ -474,3 +476,427 @@ std::string ServerDialog::serverHistoryNormalize(const std::string s)
   transform(result.begin(), result.end(), result.begin(), ::tolower);
   return result;
 }
+
+#else /* __APPLE__ */
+
+#include <cctype>
+#include <cstdio>
+#include <cstring>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <FL/Fl_Browser.H>
+#include <FL/Fl_Menu_Button.H>
+
+#include "ProfileEditor.h"
+#include "ProfileStore.h"
+#include "UserDialog.h"
+
+namespace {
+
+class ProfileBrowser : public Fl_Browser {
+public:
+  ProfileBrowser(int x, int y, int w, int h)
+    : Fl_Browser(x, y, w, h)
+  {
+  }
+
+protected:
+  int item_height(void *item) const override
+  {
+    return Fl_Browser::item_height(item) + FL_NORMAL_SIZE / 2;
+  }
+
+  int incr_height() const override
+  {
+    return Fl_Browser::incr_height() + FL_NORMAL_SIZE / 2;
+  }
+
+public:
+
+  int handle(int event) override
+  {
+    if (event == FL_PUSH) {
+      const int button = Fl::event_button();
+      const int ret = Fl_Browser::handle(event);
+
+      /* 在鼠标按下事件中分发回调，确保双击状态仍然有效。 */
+      if (value() > 0 &&
+          (button == FL_RIGHT_MOUSE ||
+           (button == FL_LEFT_MOUSE && Fl::event_clicks())))
+        do_callback();
+
+      return ret;
+    }
+
+    if (event == FL_RELEASE && Fl::event_button() == FL_RIGHT_MOUSE)
+      return 1;
+
+    return Fl_Browser::handle(event);
+  }
+};
+
+static bool same_profile_name(const std::string& a, const std::string& b)
+{
+  if (a.size() != b.size())
+    return false;
+
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (std::tolower((unsigned char)a[i]) !=
+        std::tolower((unsigned char)b[i]))
+      return false;
+  }
+
+  return true;
+}
+
+} // namespace
+
+
+ServerDialog::ServerDialog()
+  : Fl_Window(500, 0, "TigerVNC"),
+    profileList(nullptr),
+    contextLine(0)
+{
+  int x = OUTER_MARGIN;
+  int y = OUTER_MARGIN;
+  Fl_Button *button;
+
+  profileList = new ProfileBrowser(x, y, w() - OUTER_MARGIN * 2, 230);
+  profileList->type(FL_HOLD_BROWSER);
+  profileList->textsize(3 * FL_NORMAL_SIZE / 2);
+  profileList->when(FL_WHEN_NEVER);
+  profileList->callback(handleProfiles, this);
+  y += profileList->h() + INNER_MARGIN;
+
+  button = new Fl_Button(x, y, w() - OUTER_MARGIN * 2, BUTTON_HEIGHT,
+                         _("Add configuration"));
+  button->callback(handleAdd, this);
+  y += BUTTON_HEIGHT + INNER_MARGIN;
+
+  Fl_Box *divider = new Fl_Box(0, y, w(), 2);
+  divider->box(FL_THIN_DOWN_FRAME);
+  y += divider->h() + INNER_MARGIN;
+
+  button = new Fl_Button(x, y, BUTTON_WIDTH, BUTTON_HEIGHT, _("About..."));
+  button->callback(handleAbout, this);
+
+  int buttonX = w() - OUTER_MARGIN - BUTTON_WIDTH;
+  button = new Fl_Button(buttonX, y, BUTTON_WIDTH, BUTTON_HEIGHT,
+                         fl_cancel);
+  button->callback(handleCancel, this);
+
+  y += BUTTON_HEIGHT + OUTER_MARGIN;
+
+  end();
+  /* Keep the footer controls below the list instead of letting the list
+     expand over the entire window during the initial resize. */
+  resizable(nullptr);
+  size(w(), y);
+  callback(handleCancel, this);
+}
+
+
+ServerDialog::~ServerDialog()
+{
+}
+
+
+void ServerDialog::run(const char* /*servername*/, char *newservername)
+{
+  ServerDialog dialog;
+
+  try {
+    dialog.loadProfiles();
+  } catch (std::exception& e) {
+    vlog.error("%s", e.what());
+    fl_alert(_("Unable to load VNC configurations:\n\n%s"), e.what());
+  }
+
+  dialog.show();
+  while (dialog.shown())
+    Fl::wait();
+
+  if (dialog.selectedServerName.empty()) {
+    newservername[0] = '\0';
+    return;
+  }
+
+  strncpy(newservername, dialog.selectedServerName.c_str(),
+          VNCSERVERNAMELEN);
+  newservername[VNCSERVERNAMELEN - 1] = '\0';
+}
+
+
+std::string ServerDialog::profileDirectory() const
+{
+  const char *home = core::getuserhomedir();
+  if (home == nullptr)
+    throw std::runtime_error(_("Could not determine the user home directory"));
+
+  return std::string(home) + "/TigerVNC";
+}
+
+
+std::string ServerDialog::profilePath(const std::string& name) const
+{
+  return profileDirectory() + "/" + name + ".tigervnc";
+}
+
+
+void ServerDialog::loadProfiles()
+{
+  ProfileStore store(profileDirectory());
+  profileNames = store.listProfiles();
+  refreshProfiles();
+}
+
+
+void ServerDialog::refreshProfiles()
+{
+  profileList->clear();
+  for (const std::string& name : profileNames)
+    profileList->add(name.c_str());
+  profileList->redraw();
+}
+
+
+bool ServerDialog::readProfile(const std::string& name,
+                               ProfileEditorData *data)
+{
+  /* Start from scratch so that settings of a previously used configuration
+     cannot leak into this one */
+  resetViewerParameters();
+
+  char *server = loadViewerParameters(profilePath(name).c_str());
+  data->name = name;
+  data->serverName = server != nullptr ? server : "";
+  data->username = ::username;
+  data->password.clear();
+
+  ProfileStore store(profileDirectory());
+  try {
+    store.readPassword(name, &data->password);
+  } catch (const std::exception& e) {
+    /* A damaged password file must not make an otherwise usable profile
+       disappear; authentication will ask for a fresh password. */
+    vlog.error("Unable to read password for profile %s: %s",
+               name.c_str(), e.what());
+  }
+
+  return !data->serverName.empty();
+}
+
+
+bool ServerDialog::writeProfile(const ProfileEditorData& data,
+                                const std::string& oldName)
+{
+  for (const std::string& existing : profileNames) {
+    if (same_profile_name(existing, data.name) &&
+        !same_profile_name(existing, oldName)) {
+      fl_alert(_("A configuration named \"%s\" already exists."),
+               data.name.c_str());
+      return false;
+    }
+  }
+
+  ProfileStore store(profileDirectory());
+  bool renamed = false;
+
+  try {
+    /* Renaming keeps the previous configuration and its password intact */
+    /* A case-only rename still needs to move the directory entry. */
+    if (!oldName.empty() && oldName != data.name) {
+      if (store.configExists(oldName)) {
+        store.renameProfile(oldName, data.name);
+        renamed = true;
+      }
+    }
+
+    ::username.setParam(data.username.c_str());
+
+    saveViewerParameters(profilePath(data.name).c_str(),
+                         data.serverName.c_str());
+
+    /* The password is stored next to the configuration; an empty password
+       removes any previously stored one */
+    store.writePassword(data.name, data.password);
+  } catch (std::exception& e) {
+    if (renamed) {
+      try {
+        store.renameProfile(data.name, oldName);
+      } catch (const std::exception& rollbackError) {
+        vlog.error("Unable to roll back configuration rename: %s",
+                   rollbackError.what());
+      }
+    }
+    vlog.error("%s", e.what());
+    fl_alert(_("Unable to save the configuration:\n\n%s"), e.what());
+    return false;
+  }
+
+  return true;
+}
+
+
+void ServerDialog::connectProfile(int line)
+{
+  if (line < 1 || line > (int)profileNames.size())
+    return;
+
+  ProfileEditorData data;
+  try {
+    if (!readProfile(profileNames[line - 1], &data)) {
+      fl_alert(_("The selected configuration has no VNC server."));
+      return;
+    }
+  } catch (std::exception& e) {
+    vlog.error("%s", e.what());
+    fl_alert(_("Unable to load the configuration:\n\n%s"), e.what());
+    return;
+  }
+
+  selectedServerName = data.serverName;
+
+  /* Let the authentication code use, and update, the stored password */
+  UserDialog::resetSavedCredentials();
+  UserDialog::setManagedPasswordFile(true);
+  ProfileStore store(profileDirectory());
+  passwordFile.setParam(store.passwordPath(profileNames[line - 1]).c_str());
+
+  hide();
+}
+
+
+void ServerDialog::editProfile(int line)
+{
+  if (line < 1 || line > (int)profileNames.size())
+    return;
+
+  const std::string oldName = profileNames[line - 1];
+  ProfileEditorData data;
+  try {
+    readProfile(oldName, &data);
+  } catch (std::exception& e) {
+    vlog.error("%s", e.what());
+    fl_alert(_("Unable to load the configuration:\n\n%s"), e.what());
+    return;
+  }
+
+  if (!ProfileEditor::edit(&data, false))
+    return;
+
+  if (writeProfile(data, oldName)) {
+    try {
+      loadProfiles();
+    } catch (std::exception& e) {
+      vlog.error("%s", e.what());
+      fl_alert(_("Unable to reload VNC configurations:\n\n%s"), e.what());
+    }
+  }
+}
+
+
+void ServerDialog::deleteProfile(int line)
+{
+  if (line < 1 || line > (int)profileNames.size())
+    return;
+
+  const std::string name = profileNames[line - 1];
+  const int choice = fl_choice(
+    _("Delete the configuration \"%s\"?"), _("Delete"), fl_cancel,
+    nullptr, name.c_str());
+  if (choice != 0)
+    return;
+
+  try {
+    ProfileStore store(profileDirectory());
+    store.removeProfile(name);
+  } catch (std::exception& e) {
+    vlog.error("%s", e.what());
+    fl_alert(_("Unable to delete the configuration:\n\n%s"), e.what());
+    return;
+  }
+
+  try {
+    loadProfiles();
+  } catch (std::exception& e) {
+    vlog.error("%s", e.what());
+    fl_alert(_("Unable to reload VNC configurations:\n\n%s"), e.what());
+  }
+}
+
+
+void ServerDialog::handleProfiles(Fl_Widget *widget, void *data)
+{
+  ServerDialog *dialog = (ServerDialog *)data;
+  Fl_Browser *browser = (Fl_Browser *)widget;
+  const int line = browser->value();
+  if (line < 1)
+    return;
+
+  if (Fl::event_button() == FL_RIGHT_MOUSE) {
+    dialog->contextLine = line;
+
+    Fl_Menu_Button menu(0, 0, 0, 0);
+    menu.add(_("Modify configuration"));
+    menu.add(_("Delete configuration"));
+    menu.callback(handleContextMenu, dialog);
+    /* popup() 接收事件窗口坐标，并自动加上窗口的屏幕偏移。 */
+    const Fl_Menu_Item *picked = menu.menu()->popup(
+      Fl::event_x(), Fl::event_y(), nullptr, nullptr, &menu);
+    if (picked != nullptr)
+      menu.picked(picked);
+    return;
+  }
+
+  dialog->connectProfile(line);
+}
+
+
+void ServerDialog::handleContextMenu(Fl_Widget *widget, void *data)
+{
+  ServerDialog *dialog = (ServerDialog *)data;
+  Fl_Menu_Button *menu = (Fl_Menu_Button *)widget;
+
+  if (menu->value() == 0)
+    dialog->editProfile(dialog->contextLine);
+  else if (menu->value() == 1)
+    dialog->deleteProfile(dialog->contextLine);
+}
+
+
+void ServerDialog::handleAdd(Fl_Widget* /*widget*/, void *data)
+{
+  ServerDialog *dialog = (ServerDialog *)data;
+  ProfileEditorData editorData;
+
+  if (!ProfileEditor::edit(&editorData, true))
+    return;
+
+  if (dialog->writeProfile(editorData, "")) {
+    try {
+      dialog->loadProfiles();
+    } catch (std::exception& e) {
+      vlog.error("%s", e.what());
+      fl_alert(_("Unable to reload VNC configurations:\n\n%s"), e.what());
+    }
+  }
+}
+
+
+void ServerDialog::handleAbout(Fl_Widget* /*widget*/, void* /*data*/)
+{
+  about_vncviewer();
+}
+
+
+void ServerDialog::handleCancel(Fl_Widget* /*widget*/, void *data)
+{
+  ServerDialog *dialog = (ServerDialog *)data;
+  dialog->selectedServerName.clear();
+  dialog->hide();
+}
+
+#endif /* __APPLE__ */

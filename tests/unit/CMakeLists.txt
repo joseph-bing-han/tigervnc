@@ -32,6 +32,10 @@ add_executable(parameters parameters.cxx)
 target_link_libraries(parameters core GTest::gtest_main)
 gtest_discover_tests(parameters)
 
+add_executable(profile_store profile_store.cxx ../../vncviewer/ProfileStore.cxx)
+target_link_libraries(profile_store core rfb GTest::gtest_main)
+gtest_discover_tests(profile_store)
+
 add_executable(pixelformat pixelformat.cxx)
 target_link_libraries(pixelformat rfb GTest::gtest_main)
 gtest_discover_tests(pixelformat)
