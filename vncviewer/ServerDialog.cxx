@@ -138,6 +138,10 @@ void ServerDialog::run(const char* servername, char *newservername)
 
   dialog.serverName->value(servername);
 
+  int x, y, w, h;
+  Fl::screen_work_area(x, y, w, h);
+  dialog.position(x + (w - dialog.w()) / 2,
+                  y + (h - dialog.h()) / 2);
   dialog.show();
 
   try {
@@ -491,7 +495,6 @@ std::string ServerDialog::serverHistoryNormalize(const std::string s)
 
 #include "ProfileEditor.h"
 #include "ProfileStore.h"
-#include "UserDialog.h"
 
 namespace {
 
@@ -606,6 +609,7 @@ ServerDialog::~ServerDialog()
 void ServerDialog::run(const char* /*servername*/, char *newservername)
 {
   ServerDialog dialog;
+  newservername[0] = '\0';
 
   try {
     dialog.loadProfiles();
@@ -614,18 +618,14 @@ void ServerDialog::run(const char* /*servername*/, char *newservername)
     fl_alert(_("Unable to load VNC configurations:\n\n%s"), e.what());
   }
 
+  int x, y, w, h;
+  Fl::screen_work_area(x, y, w, h);
+  dialog.position(x + (w - dialog.w()) / 2,
+                  y + (h - dialog.h()) / 2);
   dialog.show();
   while (dialog.shown())
     Fl::wait();
 
-  if (dialog.selectedServerName.empty()) {
-    newservername[0] = '\0';
-    return;
-  }
-
-  strncpy(newservername, dialog.selectedServerName.c_str(),
-          VNCSERVERNAMELEN);
-  newservername[VNCSERVERNAMELEN - 1] = '\0';
 }
 
 
@@ -745,27 +745,8 @@ void ServerDialog::connectProfile(int line)
   if (line < 1 || line > (int)profileNames.size())
     return;
 
-  ProfileEditorData data;
-  try {
-    if (!readProfile(profileNames[line - 1], &data)) {
-      fl_alert(_("The selected configuration has no VNC server."));
-      return;
-    }
-  } catch (std::exception& e) {
-    vlog.error("%s", e.what());
-    fl_alert(_("Unable to load the configuration:\n\n%s"), e.what());
-    return;
-  }
-
-  selectedServerName = data.serverName;
-
-  /* Let the authentication code use, and update, the stored password */
-  UserDialog::resetSavedCredentials();
-  UserDialog::setManagedPasswordFile(true);
-  ProfileStore store(profileDirectory());
-  passwordFile.setParam(store.passwordPath(profileNames[line - 1]).c_str());
-
-  hide();
+  if (!start_profile_connection(profileNames[line - 1].c_str()))
+    fl_alert(_("Unable to start a new VNC connection."));
 }
 
 
@@ -895,7 +876,6 @@ void ServerDialog::handleAbout(Fl_Widget* /*widget*/, void* /*data*/)
 void ServerDialog::handleCancel(Fl_Widget* /*widget*/, void *data)
 {
   ServerDialog *dialog = (ServerDialog *)data;
-  dialog->selectedServerName.clear();
   dialog->hide();
 }
 

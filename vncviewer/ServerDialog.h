@@ -85,7 +85,6 @@ private:
 
 protected:
 #ifdef __APPLE__
-  std::string selectedServerName;
 #else
   Fl_Suggestion_Input *serverName;
   std::list<std::string> serverHistory;

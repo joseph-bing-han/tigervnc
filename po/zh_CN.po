@@ -1193,3 +1193,18 @@ msgstr "无法把密码保存到“%s”：%s"
 
 msgid "Could not protect \"%s\": %s"
 msgstr "无法设置“%s”的权限：%s"
+
+msgid "New connection"
+msgstr "新建连接"
+
+msgid "Connecting"
+msgstr "正在连接"
+
+msgid "Connecting to VNC server..."
+msgstr "正在连接 VNC 服务器..."
+
+msgid "Waiting for VNC server..."
+msgstr "正在等待 VNC 服务器..."
+
+msgid "Unable to start a new VNC connection."
+msgstr "无法启动新的 VNC 连接。"

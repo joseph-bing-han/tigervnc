@@ -149,6 +149,9 @@ CConn::~CConn()
 void CConn::connect(const char* vncServerName, network::Socket* socket)
 {
   sock = socket;
+  if (sock != nullptr && !listenMode && vncServerName[0] != '\0' &&
+      strchr(vncServerName, '/') == nullptr)
+    network::getHostAndPort(vncServerName, &serverHost, &serverPort);
   if(sock == nullptr) {
     try {
 #ifndef WIN32

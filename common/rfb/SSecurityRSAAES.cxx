@@ -45,6 +45,7 @@
 #include <rdr/RandomStream.h>
 
 #include <rfb/SSecurityRSAAES.h>
+#include <rfb/NettleHash.h>
 #include <rfb/SConnection.h>
 #include <rfb/Exception.h>
 #if !defined(WIN32) && !defined(__APPLE__)
@@ -412,24 +413,24 @@ void SSecurityRSAAES::setCipher()
     sha1_init(&ctx);
     sha1_update(&ctx, 16, serverRandom);
     sha1_update(&ctx, 16, clientRandom);
-    sha1_digest(&ctx, 16, key);
+    nettleSha1Digest(&ctx, 16, key);
     rais = new rdr::AESInStream(rawis, key, 128);
     sha1_init(&ctx);
     sha1_update(&ctx, 16, clientRandom);
     sha1_update(&ctx, 16, serverRandom);
-    sha1_digest(&ctx, 16, key);
+    nettleSha1Digest(&ctx, 16, key);
     raos = new rdr::AESOutStream(rawos, key, 128);
   } else {
     struct sha256_ctx ctx;
     sha256_init(&ctx);
     sha256_update(&ctx, 32, serverRandom);
     sha256_update(&ctx, 32, clientRandom);
-    sha256_digest(&ctx, 32, key);
+    nettleSha256Digest(&ctx, 32, key);
     rais = new rdr::AESInStream(rawis, key, 256);
     sha256_init(&ctx);
     sha256_update(&ctx, 32, clientRandom);
     sha256_update(&ctx, 32, serverRandom);
-    sha256_digest(&ctx, 32, key);
+    nettleSha256Digest(&ctx, 32, key);
     raos = new rdr::AESOutStream(rawos, key, 256);
   }
   if (isAllEncrypted)
@@ -464,7 +465,7 @@ void SSecurityRSAAES::writeHash()
     sha1_update(&ctx, 4, lenClientKey);
     sha1_update(&ctx, clientKey.size, clientKeyN);
     sha1_update(&ctx, clientKey.size, clientKeyE);
-    sha1_digest(&ctx, hashSize, hash);
+    nettleSha1Digest(&ctx, hashSize, hash);
   } else {
     hashSize = 32;
     struct sha256_ctx ctx;
@@ -475,7 +476,7 @@ void SSecurityRSAAES::writeHash()
     sha256_update(&ctx, 4, lenClientKey);
     sha256_update(&ctx, clientKey.size, clientKeyN);
     sha256_update(&ctx, clientKey.size, clientKeyE);
-    sha256_digest(&ctx, hashSize, hash);
+    nettleSha256Digest(&ctx, hashSize, hash);
   }
   raos->writeBytes(hash, hashSize);
   raos->flush();
@@ -512,7 +513,7 @@ bool SSecurityRSAAES::readHash()
     sha1_update(&ctx, 4, lenServerKey);
     sha1_update(&ctx, serverKey.size, serverKeyN);
     sha1_update(&ctx, serverKey.size, serverKeyE);
-    sha1_digest(&ctx, hashSize, realHash);
+    nettleSha1Digest(&ctx, hashSize, realHash);
   } else {
     struct sha256_ctx ctx;
     sha256_init(&ctx);
@@ -522,7 +523,7 @@ bool SSecurityRSAAES::readHash()
     sha256_update(&ctx, 4, lenServerKey);
     sha256_update(&ctx, serverKey.size, serverKeyN);
     sha256_update(&ctx, serverKey.size, serverKeyE);
-    sha256_digest(&ctx, hashSize, realHash);
+    nettleSha256Digest(&ctx, hashSize, realHash);
   }
   if (memcmp(hash, realHash, hashSize) != 0)
     throw protocol_error("Hash doesn't match");

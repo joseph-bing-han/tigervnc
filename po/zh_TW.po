@@ -1098,6 +1098,21 @@ msgstr ""
 msgid "Remote desktop viewer"
 msgstr "遠端桌面檢視器"
 
+msgid "New connection"
+msgstr "建立新連線"
+
+msgid "Connecting"
+msgstr "正在連線"
+
+msgid "Connecting to VNC server..."
+msgstr "正在連線至 VNC 伺服器..."
+
+msgid "Waiting for VNC server..."
+msgstr "正在等候 VNC 伺服器..."
+
+msgid "Unable to start a new VNC connection."
+msgstr "無法啟動新的 VNC 連線。"
+
 #~ msgid "Show dot when no cursor"
 #~ msgstr "若無游標則改顯示一個點"
 

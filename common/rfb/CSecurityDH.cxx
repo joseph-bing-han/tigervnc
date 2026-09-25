@@ -35,6 +35,7 @@
 #include <nettle/md5.h>
 #include <nettle/bignum.h>
 #include <rfb/CSecurityDH.h>
+#include <rfb/NettleHash.h>
 #include <rfb/CConnection.h>
 #include <rdr/InStream.h>
 #include <rdr/OutStream.h>
@@ -125,7 +126,7 @@ void CSecurityDH::writeCredentials()
   struct md5_ctx md5Ctx;
   md5_init(&md5Ctx);
   md5_update(&md5Ctx, sharedSecret.size(), sharedSecret.data());
-  md5_digest(&md5Ctx, 16, key);
+  nettleMd5Digest(&md5Ctx, 16, key);
   struct aes128_ctx aesCtx;
   aes128_set_encrypt_key(&aesCtx, key);
 

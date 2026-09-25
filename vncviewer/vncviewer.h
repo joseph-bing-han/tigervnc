@@ -29,6 +29,9 @@ void abort_connection_with_unexpected_error(const std::exception &);
 
 void disconnect();
 bool should_disconnect();
+#ifdef __APPLE__
+bool start_profile_connection(const char* profileName);
+#endif
 
 void about_vncviewer();
 

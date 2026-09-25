@@ -33,6 +33,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <atomic>
+#include <memory>
+#include <thread>
 
 #ifdef WIN32
 #include <core/winerrno.h>
@@ -41,6 +44,9 @@
 
 #ifdef __APPLE__
 #include <Carbon/Carbon.h>
+#include <spawn.h>
+#include <sys/wait.h>
+extern char **environ;
 #endif
 
 #if !defined(WIN32) && !defined(__APPLE__)
@@ -62,17 +68,22 @@
 #include <network/TcpSocket.h>
 
 #include <FL/Fl_PNG_Image.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Button.H>
+#include <FL/Fl_Window.H>
 #include <FL/Fl_Sys_Menu_Bar.H>
 #include <FL/fl_ask.H>
 #include <FL/x.H>
 
 #include "fltk/theme.h"
-#include "fltk/util.h"
 #include "i18n.h"
 #include "parameters.h"
 #include "CConn.h"
 #include "ServerDialog.h"
 #include "UserDialog.h"
+#ifdef __APPLE__
+#include "ProfileStore.h"
+#endif
 #include "touch.h"
 #include "vncviewer.h"
 
@@ -91,6 +102,12 @@ static bool inMainloop = false;
 static bool exitMainloop = false;
 static char *exitError = nullptr;
 static bool fatalError = false;
+
+struct PendingConnection {
+  std::atomic<bool> done{false};
+  std::unique_ptr<network::Socket> socket;
+  std::string error;
+};
 
 static const char *about_text()
 {
@@ -174,28 +191,114 @@ void about_vncviewer()
   fl_message("%s", about_text());
 }
 
+static void cancel_connection(Fl_Widget* /*widget*/, void* data)
+{
+  *(bool*)data = true;
+  disconnect();
+}
+
+static network::Socket* connect_tcp(const char* server)
+{
+  std::string host;
+  int port;
+  try {
+    network::getHostAndPort(server, &host, &port);
+  } catch (std::exception& e) {
+    abort_connection(_("Failed to connect to \"%s\":\n\n%s"), server, e.what());
+    return nullptr;
+  }
+
+  auto pending = std::make_shared<PendingConnection>();
+  std::thread([pending, host, port]() {
+    try {
+      pending->socket.reset(new network::TcpSocket(host.c_str(), port));
+    } catch (std::exception& e) {
+      pending->error = e.what();
+    }
+    pending->done.store(true, std::memory_order_release);
+  }).detach();
+
+  Fl_Window dialog(360, 100, _("Connecting"));
+  Fl_Box message(15, 15, 330, 35, _("Connecting to VNC server..."));
+  Fl_Button cancel(245, 60, 100, 27, fl_cancel);
+  bool cancelled = false;
+  cancel.callback(cancel_connection, &cancelled);
+  dialog.callback(cancel_connection, &cancelled);
+  dialog.end();
+  dialog.set_modal();
+  int x, y, w, h;
+  Fl::screen_work_area(x, y, w, h);
+  dialog.position(x + (w - dialog.w()) / 2, y + (h - dialog.h()) / 2);
+  dialog.show();
+
+  while (!cancelled && !pending->done.load(std::memory_order_acquire))
+    Fl::wait(0.05);
+  dialog.hide();
+
+  if (cancelled) {
+    disconnect();
+    return nullptr;
+  }
+  if (!pending->socket) {
+    abort_connection(_("Failed to connect to \"%s\":\n\n%s"),
+                     server, pending->error.c_str());
+    return nullptr;
+  }
+  return pending->socket.release();
+}
+
 static void mainloop(const char* vncserver, network::Socket* sock)
 {
   while (true) {
     CConn *cc;
+    network::Socket* connectionSock = sock;
 
     exitMainloop = false;
 
     cc = new CConn();
-    cc->connect(vncserver, sock);
+    if (connectionSock == nullptr && strchr(vncserver, '/') == nullptr)
+      connectionSock = connect_tcp(vncserver);
+    if (!exitMainloop)
+      cc->connect(vncserver, connectionSock);
+
+    Fl_Window progress(360, 100, _("Connecting"));
+    Fl_Box message(15, 15, 330, 35, _("Waiting for VNC server..."));
+    Fl_Button cancel(245, 60, 100, 27, fl_cancel);
+    bool cancelled = false;
+    cancel.callback(cancel_connection, &cancelled);
+    progress.callback(cancel_connection, &cancelled);
+    progress.end();
+    if (!exitMainloop && !cc->isConnected()) {
+      int x, y, w, h;
+      Fl::screen_work_area(x, y, w, h);
+      progress.position(x + (w - progress.w()) / 2,
+                        y + (h - progress.h()) / 2);
+      progress.show();
+    }
 
     while (!exitMainloop) {
       int next_timer;
 
+      if (cancelled) {
+        disconnect();
+        break;
+      }
+      if (cc->isConnected())
+        progress.hide();
+
       next_timer = core::Timer::checkTimeouts();
       if (next_timer < 0)
         next_timer = INT_MAX;
+      if (progress.shown() && next_timer > 50)
+        next_timer = 50;
 
       if (Fl::wait((double)next_timer / 1000.0) < 0.0) {
         vlog.error(_("Internal FLTK error. Exiting."));
         exit(-1);
       }
     }
+
+    progress.hide();
 
     delete cc;
 
@@ -235,27 +338,25 @@ static void about_callback(Fl_Widget* /*widget*/, void* /*data*/)
   about_vncviewer();
 }
 
-static void new_connection_cb(Fl_Widget* /*widget*/, void* /*data*/)
+bool start_profile_connection(const char* profileName)
 {
-  const char *argv[2];
+  const char *argv[4];
   pid_t pid;
 
-  pid = fork();
-  if (pid == -1) {
-    vlog.error(_("Error starting new connection: %s"), strerror(errno));
-    return;
-  }
-
-  if (pid != 0)
-    return;
-
   argv[0] = argv0;
-  argv[1] = nullptr;
-
-  execvp(argv[0], (char * const *)argv);
-
-  vlog.error(_("Error starting new connection: %s"), strerror(errno));
-  _exit(1);
+  argv[1] = "--profile";
+  argv[2] = profileName;
+  argv[3] = nullptr;
+  int error = posix_spawnp(&pid, argv[0], nullptr, nullptr,
+                           (char * const *)argv, environ);
+  if (error != 0) {
+    vlog.error(_("Error starting new connection: %s"), strerror(error));
+    return false;
+  }
+  std::thread([pid]() {
+    while (waitpid(pid, nullptr, 0) == -1 && errno == EINTR) {}
+  }).detach();
+  return true;
 }
 #endif
 
@@ -416,17 +517,6 @@ static void init_fltk()
 
   fl_mac_set_about(about_callback, nullptr);
 
-  Fl_Sys_Menu_Bar *menubar;
-  char buffer[1024];
-  menubar = new Fl_Sys_Menu_Bar(0, 0, 500, 25);
-  // Fl_Sys_Menu_Bar overrides methods without them being virtual,
-  // which means we cannot use our generic Fl_Menu_ helpers.
-  if (fltk_menu_escape(p_("SysMenu|", "&File"),
-                       buffer, sizeof(buffer)) < sizeof(buffer))
-      menubar->add(buffer, 0, nullptr, nullptr, FL_SUBMENU);
-  if (fltk_menu_escape(p_("SysMenu|File|", "&New Connection"),
-                       buffer, sizeof(buffer)) < sizeof(buffer))
-      menubar->insert(1, buffer, FL_COMMAND | 'n', new_connection_cb);
 #endif
 }
 
@@ -632,6 +722,9 @@ static void mktunnel()
 int main(int argc, char** argv)
 {
   const char *localedir;
+#ifdef __APPLE__
+  const char *profileName = nullptr;
+#endif
 
   argv0 = argv[0];
 
@@ -682,6 +775,18 @@ int main(int argc, char** argv)
 
   for (int i = 1; i < argc;) {
     int ret;
+
+#ifdef __APPLE__
+    if (strcmp(argv[i], "--profile") == 0) {
+      if (profileName != nullptr || i + 1 >= argc) {
+        usage(argv[0]);
+        return 1;
+      }
+      profileName = argv[i + 1];
+      i += 2;
+      continue;
+    }
+#endif
 
     ret = core::Configuration::handleParamArg(argc, argv, i);
     if (ret > 0) {
@@ -734,7 +839,30 @@ int main(int argc, char** argv)
   enable_touch();
 
   // Check if the server name in reality is a configuration file
-  potentiallyLoadConfigurationFile(vncServerName);
+#ifdef __APPLE__
+  if (profileName != nullptr) {
+    if (vncServerName[0] != '\0') {
+      usage(argv[0]);
+      return 1;
+    }
+    try {
+      ProfileStore store;
+      const std::string config = store.configPath(profileName);
+      resetViewerParameters();
+      const char* server = loadViewerParameters(config.c_str());
+      if (server == nullptr || server[0] == '\0')
+        throw std::runtime_error(_("The selected configuration has no VNC server."));
+      strncpy(vncServerName, server, VNCSERVERNAMELEN - 1);
+      vncServerName[VNCSERVERNAMELEN - 1] = '\0';
+      passwordFile.setParam(store.passwordPath(profileName).c_str());
+      UserDialog::setManagedPasswordFile(true);
+    } catch (std::exception& e) {
+      vlog.error("%s", e.what());
+      abort_vncviewer(_("Unable to load the configuration:\n\n%s"), e.what());
+    }
+  } else
+#endif
+    potentiallyLoadConfigurationFile(vncServerName);
 
   migrateDeprecatedOptions();
 
@@ -804,8 +932,13 @@ int main(int argc, char** argv)
   } else {
     if (vncServerName[0] == '\0') {
       ServerDialog::run(defaultServerName, vncServerName);
-      if (vncServerName[0] == '\0')
+      if (vncServerName[0] == '\0') {
+#ifdef __APPLE__
+        return 0;
+#else
         return 1;
+#endif
+      }
     }
 
 #ifndef WIN32

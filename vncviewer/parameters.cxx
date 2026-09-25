@@ -746,6 +746,8 @@ void resetViewerParameters()
 {
   for (core::VoidParameter* param : parameterArray)
     param->setParam(param->getDefaultStr().c_str());
+  for (core::VoidParameter* param : readOnlyParameterArray)
+    param->setParam(param->getDefaultStr().c_str());
 }
 
 

@@ -37,6 +37,7 @@ public:
   ~CConn();
 
   void connect(const char* vncServerName, network::Socket* sock=nullptr);
+  bool isConnected() const { return desktop != nullptr; }
 
   std::string connectionInfo();
 
